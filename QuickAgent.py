@@ -5,6 +5,7 @@ import subprocess
 import requests
 import time
 import os
+import streamlit as st
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_groq import ChatGroq
@@ -30,9 +31,9 @@ load_dotenv()
 
 class LanguageModelProcessor:
     def __init__(self):
-        self.llm = ChatGroq(temperature=0, model_name="mixtral-8x7b-32768", groq_api_key=os.getenv("GROQ_API_KEY"))
+        # self.llm = ChatGroq(temperature=0, model_name="mixtral-8x7b-32768", groq_api_key=os.getenv("GROQ_API_KEY"))
         # self.llm = ChatOpenAI(temperature=0, model_name="gpt-4-0125-preview", openai_api_key=os.getenv("OPENAI_API_KEY"))
-        # self.llm = ChatOpenAI(temperature=0, model_name="gpt-3.5-turbo-0125", openai_api_key=os.getenv("OPENAI_API_KEY"))
+        self.llm = ChatOpenAI(temperature=0, model_name="gpt-3.5-turbo-0125", openai_api_key=os.getenv("OPENAI_API_KEY"))
 
         self.memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
 
@@ -65,6 +66,7 @@ class LanguageModelProcessor:
 
         elapsed_time = int((end_time - start_time) * 1000)
         print(f"LLM ({elapsed_time}ms): {response['text']}")
+        st.write(f"**[LLM]** ({elapsed_time}ms): {response['text']}")
         return response['text']
 
 class TextToSpeech:
@@ -108,6 +110,7 @@ class TextToSpeech:
                         first_byte_time = time.time()  # Record the time when the first byte is received
                         ttfb = int((first_byte_time - start_time)*1000)  # Calculate the time to first byte
                         print(f"TTS Time to First Byte (TTFB): {ttfb}ms\n")
+                        st.write(f"**[TTS]** Time to First Byte (TTFB): {ttfb}ms\n")
                     player_process.stdin.write(chunk)
                     player_process.stdin.flush()
 
@@ -140,6 +143,7 @@ async def get_transcript(callback):
 
         dg_connection = deepgram.listen.asynclive.v("1")
         print ("Listening...")
+        st.write("Listening...")
 
         async def on_message(self, result, **kwargs):
             sentence = result.channel.alternatives[0].transcript
@@ -153,7 +157,8 @@ async def get_transcript(callback):
                 # Check if the full_sentence is not empty before printing
                 if len(full_sentence.strip()) > 0:
                     full_sentence = full_sentence.strip()
-                    print(f"Human: {full_sentence}")
+                    print(f"**[Human]** {full_sentence}")
+                    st.write(f"**[Human]** {full_sentence}")
                     callback(full_sentence)  # Call the callback with the full_sentence
                     transcript_collector.reset()
                     transcription_complete.set()  # Signal to stop transcription and exit
@@ -167,7 +172,7 @@ async def get_transcript(callback):
             encoding="linear16",
             channels=1,
             sample_rate=16000,
-            endpointing=300,
+            endpointing=600,
             smart_format=True,
         )
 
@@ -215,5 +220,14 @@ class ConversationManager:
             self.transcription_response = ""
 
 if __name__ == "__main__":
-    manager = ConversationManager()
-    asyncio.run(manager.main())
+    st.title("Voice Bot calling center demo")
+
+    if st.button("Launch a call"):
+
+        with st.spinner("Call in process.."):
+
+            manager = ConversationManager()
+            asyncio.run(manager.main())
+
+        if st.button("try a call again"):
+            st.rerun()
