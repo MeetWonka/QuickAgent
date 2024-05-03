@@ -18,6 +18,7 @@ from langchain.prompts import (
     HumanMessagePromptTemplate,
 )
 from langchain.chains import LLMChain
+from voice_bot import voice_bot
 
 from deepgram import (
     DeepgramClient,
@@ -26,11 +27,12 @@ from deepgram import (
     LiveOptions,
     Microphone,
 )
-
+import logging
 load_dotenv()
 
+
 class LanguageModelProcessor:
-    def __init__(self):
+    def __init__(self, prompt):
         # self.llm = ChatGroq(temperature=0, model_name="mixtral-8x7b-32768", groq_api_key=os.getenv("GROQ_API_KEY"))
         # self.llm = ChatOpenAI(temperature=0, model_name="gpt-4-0125-preview", openai_api_key=os.getenv("OPENAI_API_KEY"))
         self.llm = ChatOpenAI(temperature=0, model_name="gpt-3.5-turbo-0125", openai_api_key=os.getenv("OPENAI_API_KEY"))
@@ -38,8 +40,22 @@ class LanguageModelProcessor:
         self.memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
 
         # Load the system prompt from a file
-        with open('system_prompt.txt', 'r') as file:
-            system_prompt = file.read().strip()
+        system_prompt = prompt
+        
+        self.prompt = ChatPromptTemplate.from_messages([
+            SystemMessagePromptTemplate.from_template(system_prompt),
+            MessagesPlaceholder(variable_name="chat_history"),
+            HumanMessagePromptTemplate.from_template("{text}")
+        ])
+
+        self.conversation = LLMChain(
+            llm=self.llm,
+            prompt=self.prompt,
+            memory=self.memory
+        )
+    
+    def set_prompt(self, prompt):
+        system_prompt = prompt
         
         self.prompt = ChatPromptTemplate.from_messages([
             SystemMessagePromptTemplate.from_template(system_prompt),
@@ -53,8 +69,20 @@ class LanguageModelProcessor:
             memory=self.memory
         )
 
+    def post_process(self, text): 
+        t = text.split("\n")
+        #check format of first element is [SOMETHING]
+        action = t[0].strip()
+        if t[0][0] == "[" and t[0][-1] == "]":
+            action = t[0].strip()
+        text = t[1].strip()
+        return action, text
+            
+
     def process(self, text):
         self.memory.chat_memory.add_user_message(text)  # Add user message to memory
+        print("chat_memory")
+        print(str(self.memory.chat_memory))
 
         start_time = time.time()
 
@@ -67,7 +95,8 @@ class LanguageModelProcessor:
         elapsed_time = int((end_time - start_time) * 1000)
         print(f"LLM ({elapsed_time}ms): {response['text']}")
         st.write(f"**[LLM]** ({elapsed_time}ms): {response['text']}")
-        return response['text']
+
+        return self.post_process(response['text'])
 
 class TextToSpeech:
     # Set your Deepgram API Key and desired voice model
@@ -134,9 +163,9 @@ class TranscriptCollector:
 transcript_collector = TranscriptCollector()
 
 async def get_transcript(callback):
-    transcription_complete = asyncio.Event()  # Event to signal transcription completion
+        transcription_complete = asyncio.Event()  # Event to signal transcription completion
 
-    try:
+    # try:
         # example of setting up a client config. logging values: WARNING, VERBOSE, DEBUG, SPAM
         config = DeepgramClientOptions(options={"keepalive": "true"})
         deepgram: DeepgramClient = DeepgramClient("", config)
@@ -190,9 +219,9 @@ async def get_transcript(callback):
         # Indicate that we've finished
         await dg_connection.finish()
 
-    except Exception as e:
-        print(f"Could not open socket: {e}")
-        return
+    # except Exception as e:
+    #     print(f"Could not open socket: {e}")
+    #     return
 
 class ConversationManager:
     def __init__(self):
@@ -202,32 +231,58 @@ class ConversationManager:
     async def main(self):
         def handle_full_sentence(full_sentence):
             self.transcription_response = full_sentence
-
+        i = 0
         # Loop indefinitely until "goodbye" is detected
-        while True:
-            await get_transcript(handle_full_sentence)
+        self.transcription_response = st.text_input(f"Type your message here" + str(i), "")
+        if st.button("Send"):
+            i += 1
+        # await get_transcript(handle_full_sentence)
+            
+            #get input from user
             
             # Check for "goodbye" to exit the loop
             if "goodbye" in self.transcription_response.lower():
-                break
+                st.write(f"**[Human]** {self.transcription_response}")
             
             llm_response = self.llm.process(self.transcription_response)
 
-            tts = TextToSpeech()
-            tts.speak(llm_response)
+            # tts = TextToSpeech()
+            # tts.speak(llm_response)
+            st.write(f"**[TTS]** {llm_response}")
 
             # Reset transcription_response for the next loop iteration
             self.transcription_response = ""
 
+print("Starting ConversationManager")
+active_leaf = "start"
+
 if __name__ == "__main__":
-    st.title("Voice Bot calling center demo")
+    
+    transcription_response = ""
 
-    if st.button("Launch a call"):
+    llm = LanguageModelProcessor(voice_bot.get(active_leaf).get("prompt"))
 
-        with st.spinner("Call in process.."):
+    while True:
+            transcription_response = input("Type your message here: ")
+        # await get_transcript(handle_full_sentence)
+            print(f"**[Human]** {transcription_response}")
+            #get input from user
+            
+            # Check for "goodbye" to exit the loop
+            # if "goodbye" in transcription_response.lower():
+            #     st.write(f"**[Human]** {transcription_response}")
+            
+            action, llm_response = llm.process(transcription_response)
 
-            manager = ConversationManager()
-            asyncio.run(manager.main())
+            # tts = TextToSpeech()
+            # tts.speak(llm_response)
+            if action in voice_bot.get(active_leaf).get("output"):
+                print("set prompt")
+                llm.set_prompt(voice_bot.get(llm_response).get("prompt"))
+                llm_response = llm.process("generate follow up question depending of chat history")
+            
+            if action in ["[END OF CALL]"]:
+                print("End of call")
 
-        if st.button("try a call again"):
-            st.rerun()
+            # Reset transcription_response for the next loop iteration
+            transcription_response = ""
