@@ -11,7 +11,10 @@ class PostFunctionCalling :
         self.model_name = kwargs.get("model_name")
         self.function_schema = kwargs.get("function_calling_prompt")
         self.to_call_variable = kwargs.get("save_to_call_variable")
+        self.is_save_to_call_variable = kwargs.get("save_to_call_variable", True)
         self.name = kwargs.get("function_calling_name", "function_calling")
+        self.replacement_value = kwargs.get("replacement_value", {})
+        self.action = kwargs.get("action")
         self.client = OpenAI()
 
     
@@ -57,7 +60,14 @@ class PostFunctionCalling :
             }
         }]
         return function_schema
+    
 
+    def save_to_call_variable(self, args):
+        if self.is_save_to_call_variable:
+            for key, value in args.items():
+                if key in self.replacement_value:
+                    value = self.replacement_value[key].get(value, value)
+                self.call_variable[key] = value           
 
     
     def run(self):
@@ -73,9 +83,9 @@ class PostFunctionCalling :
             functions=function_schema,
             function_call={"name": function_schema[0]["name"]}
         )
-
         args = json.loads(response.choices[0].message.function_call.arguments)
-        for key, value in args.items():
-            self.call_variable[key] = value
-        print(self.call_variable)
+        self.save_to_call_variable(args)
+        print(args)
+        return self.action["[DEFAULT]"]
+        
         

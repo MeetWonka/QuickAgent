@@ -9,6 +9,7 @@ import json
 import traceback
 from openai import AsyncOpenAI
 import openai
+from langchain_groq import ChatGroq
 
 
 class ChatFunction():
